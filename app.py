@@ -6,8 +6,8 @@ from streamlit_gsheets import GSheetsConnection
 
 # --- 設定 ---
 ALERT_MINUTES = 5 
-STORES = ["東金町", "西新小岩", "綾瀬"]
-SHEET_NAME = "シート1"  # ★ここ！スプレッドシート下のタブ名に合わせてください
+STORES = ["渋谷店", "新宿店", "池袋店"]
+SHEET_NAME = "data"  # ★ここを「data」に変更しました！
 
 # --- パスワード認証 ---
 def check_password():
@@ -19,12 +19,7 @@ def check_password():
     if "PASSWORD" not in st.secrets:
         return True 
 
-    st.text_input(
-        "パスワードを入力してください", 
-        type="password", 
-        key="password_input", 
-        on_change=password_entered
-    )
+    st.text_input("パスワード", type="password", key="password_input", on_change=password_entered)
     return False
 
 def password_entered():
@@ -45,18 +40,17 @@ st.markdown("""<style>div.stButton > button { width: 100%; height: 3em; font-wei
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
-    try:
-        # ★修正：ワークシート名を指定して読み込む
-        df = conn.read(worksheet=SHEET_NAME)
-        
-        required_cols = ["店舗名", "受付番号", "受付時間", "ステータス"]
-        for col in required_cols:
-            if col not in df.columns:
-                df[col] = ""
-        # 空行や欠損値を文字型として処理（エラー回避）
-        return df.fillna("")
-    except:
-        return pd.DataFrame(columns=["店舗名", "受付番号", "受付時間", "ステータス"])
+    # ★修正：エラー隠し（try-except）を削除しました。
+    # これで「読み込み」が失敗しているなら、起動直後にド派手なエラーが出ます。
+    
+    df = conn.read(worksheet=SHEET_NAME)
+    
+    # 必要な列がない場合の補完処理
+    required_cols = ["店舗名", "受付番号", "受付時間", "ステータス"]
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = ""
+    return df.fillna("")
 
 # 店舗選択
 current_store = st.sidebar.selectbox("🏠 店舗を選択", STORES)
@@ -65,7 +59,9 @@ st.title(f"📱 {current_store} 受付")
 if st.button("データ更新 🔄"):
     st.rerun()
 
+# ここでエラーが出るかチェック！
 df = load_data()
+
 df_store = df[df["店舗名"] == current_store]
 
 tab1, tab2 = st.tabs(["🖊️ 受付", "📋 一覧"])
@@ -88,7 +84,7 @@ with tab1:
             })
             updated_df = pd.concat([df, new_data], ignore_index=True)
             
-            # ★修正：ワークシート名を指定して書き込む
+            # 書き込み処理
             conn.update(worksheet=SHEET_NAME, data=updated_df)
             
             st.toast(f"✅ {number}番 を登録しました！", icon="🎉")
@@ -105,7 +101,6 @@ with tab2:
         now = datetime.now()
         for index, row in pending_df.iterrows():
             original_index = index
-
             reg_time_str = str(row['受付時間'])
             try:
                 reg_time = datetime.strptime(reg_time_str, "%H:%M:%S")
@@ -130,10 +125,7 @@ with tab2:
                     st.write("") 
                     if st.button("完了", key=f"btn_{original_index}", type="primary"):
                         df.at[original_index, "ステータス"] = "完了"
-                        
-                        # ★修正：ワークシート名を指定して書き込む
                         conn.update(worksheet=SHEET_NAME, data=df)
-                        
                         st.toast(f"👋 {row['受付番号']}番、完了！")
                         time.sleep(0.5)
                         st.rerun()
