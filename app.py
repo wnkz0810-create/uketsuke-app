@@ -1,35 +1,48 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+import json
 
-st.set_page_config(page_title="接続診断")
-st.title("🕵️‍♀️ 接続診断モード")
+st.set_page_config(page_title="Secrets診断")
+st.title("🔍 Secrets 診断ツール")
 
-# 接続を試みる
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    
-    # SecretsからURLを取得して、直接スプレッドシートを開いてみる
-    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-    st.write("ターゲットURL:", url)
-    
-    # gspreadの機能を使って情報を取得
-    sh = conn.client.open_by_url(url)
-    st.success(f"✅ 成功！ スプレッドシート名: **{sh.title}**")
-    
-    st.write("---")
-    st.write("🤖 ロボットが見えているシート一覧:")
-    
-    # 全シートの名前を表示
-    worksheet_list = sh.worksheets()
-    for ws in worksheet_list:
-        st.info(f"📄 シート名: **{ws.title}** (ID: {ws.id})")
+st.write("あなたのSecretsの設定状況をチェックします...")
+st.write("---")
 
-    st.warning("👆 コードの `SHEET_NAME` は、この「シート名」と完全に一致していますか？")
+# 1. 見出しのチェック
+if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
+    st.success("✅ `[connections.gsheets]` セクションは見つかりました！")
+    
+    # 中身のチェック
+    section = st.secrets["connections"]["gsheets"]
+    
+    # spreadsheetはあるか？
+    if "spreadsheet" in section:
+        st.success(f"✅ spreadsheet設定あり: `{section['spreadsheet']}`")
+    else:
+        st.error("❌ `spreadsheet = ...` の行が見つかりません。")
 
-except Exception as e:
-    st.error("❌ 接続エラーが発生しました")
-    st.code(e)
-    st.write("考えられる原因：")
-    st.write("1. SecretsのJSON貼り付けミス")
-    st.write("2. スプレッドシートの「共有」にロボットのメアドが入っていない")
-    st.write("3. Google Drive API / Sheets API が無効")
+    # service_accountはあるか？
+    if "service_account" in section:
+        st.success("✅ `service_account` 設定あり")
+        
+        # JSONとして正しいか？
+        try:
+            sa_data = json.loads(section["service_account"], strict=False)
+            email = sa_data.get("client_email", "不明")
+            st.success(f"✅ JSONの読み込み成功！")
+            st.info(f"🤖 ロボットのメール: `{email}`")
+            st.write("ここまでOKなら、接続エラーの原因はコード側ではなくGoogle側のAPI設定です。")
+        except json.JSONDecodeError as e:
+            st.error("❌ `service_account` の中身が正しいJSONではありません。")
+            st.error(f"エラー内容: {e}")
+            st.warning("コピペする時に `{` や `}` が欠けていませんか？")
+    else:
+        st.error("❌ `service_account = ...` の行が見つかりません（または場所がズレています）。")
+        st.warning("必ず `[connections.gsheets]` の行よりも **下** に書いてください。")
+
+else:
+    st.error("❌ `[connections.gsheets]` という見出しが見つかりません！")
+    st.warning("Secretsの一番上に `[connections.gsheets]` と書いてあるか確認してください。")
+
+st.write("---")
+st.write("👇 **現在のSecretsのキー一覧（中身は隠しています）**")
+st.write(st.secrets)
