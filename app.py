@@ -1,44 +1,195 @@
 import streamlit as st
-import json
 import pandas as pd
-from google.oauth2 import service_account
+import json
+import time
+from datetime import datetime
 import gspread
+from google.oauth2 import service_account
 
-st.set_page_config(page_title="強制接続テスト")
-st.title("🛡️ 最終手段：直接接続テスト")
+# --- 設定 ---
+ALERT_MINUTES = 5 
+STORES = ["渋谷店", "新宿店", "池袋店"]
 
-try:
-    # 1. Secretsからデータを取得（ここが読み込めればSecretsは合っている）
-    if "connections" not in st.secrets or "gsheets" not in st.secrets["connections"]:
-        st.error("❌ Secretsの設定が見つかりません。")
-        st.stop()
-
-    json_str = st.secrets["connections"]["gsheets"]["service_account"]
-    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-
-    # 2. JSONを辞書データに変換
-    creds_dict = json.loads(json_str)
-
-    # 3. 直接認証を行う（Streamlitの機能を介さない）
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
-
-    # 4. シートを開いてみる
-    sh = client.open_by_url(url)
-    worksheet = sh.get_worksheet(0) # 0番目（一番左）のシート
+# --- 1. パスワード認証 ---
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+    if st.session_state.password_correct:
+        return True
     
-    st.success(f"✅ つながりました！ シート名: **{sh.title}**")
-    st.balloons()
-    
-    # 5. 書き込みテスト
-    st.write("書き込みテスト中...")
-    worksheet.update_acell('E1', 'ConnectionOK')
-    st.success("✅ 書き込みも成功しました！")
-    
-    st.info("このコードで成功したら、この方式を使った「完成版」をお渡しします。")
+    # ローカル開発時などのエラー回避
+    if "PASSWORD" not in st.secrets:
+        return True 
 
-except Exception as e:
-    st.error("❌ エラーが発生しました")
-    st.code(e)
-    st.write("エラー内容を教えてください！")
+    st.text_input("パスワード", type="password", key="password_input", on_change=password_entered)
+    return False
+
+def password_entered():
+    if st.session_state["password_input"] == st.secrets["PASSWORD"]:
+        st.session_state.password_correct = True
+        del st.session_state["password_input"]
+    else:
+        st.error("パスワードが違います")
+
+if not check_password():
+    st.stop()
+
+# --- 2. データベース接続（直接接続方式） ---
+@st.cache_resource
+def get_worksheet():
+    """スプレッドシートに接続してシートオブジェクトを返す"""
+    try:
+        # Secretsから情報を取得
+        json_str = st.secrets["connections"]["gsheets"]["service_account"]
+        url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+        
+        # 認証
+        creds_dict = json.loads(json_str)
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+        
+        # シートを開く（0番目のシート）
+        sh = client.open_by_url(url)
+        return sh.get_worksheet(0)
+    except Exception as e:
+        st.error(f"接続エラー: {e}")
+        return None
+
+def load_data():
+    """シートから全データを読み込んでDataFrameにする"""
+    sheet = get_worksheet()
+    if sheet is None:
+        return pd.DataFrame()
+
+    # 全データを取得（辞書形式のリスト）
+    data = sheet.get_all_records()
+    
+    # データがない場合は空のDFを返す
+    if not data:
+        return pd.DataFrame(columns=["店舗名", "受付番号", "受付時間", "ステータス"])
+    
+    df = pd.DataFrame(data)
+    
+    # 列不足の補完
+    required_cols = ["店舗名", "受付番号", "受付時間", "ステータス"]
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = ""
+            
+    # 全て文字列として扱う（エラー防止）
+    return df.astype(str)
+
+def save_data(df):
+    """DataFrameを丸ごとシートに上書き保存する"""
+    sheet = get_worksheet()
+    if sheet is None:
+        return
+
+    # データフレームをリスト形式に変換（ヘッダー付き）
+    data_to_write = [df.columns.values.tolist()] + df.values.tolist()
+    
+    # シートをクリアして書き込み
+    sheet.clear()
+    sheet.update(data_to_write)
+
+# --- 3. アプリ画面 ---
+st.set_page_config(page_title="クラウド受付", layout="centered")
+st.markdown("""<style>div.stButton > button { width: 100%; height: 3em; font-weight: bold; }</style>""", unsafe_allow_html=True)
+
+# サイドバー：店舗選択
+current_store = st.sidebar.selectbox("🏠 店舗を選択", STORES)
+st.title(f"📱 {current_store} 受付")
+
+# 更新ボタン
+if st.button("データ更新 🔄"):
+    st.cache_data.clear()
+    st.rerun()
+
+# データ読み込み
+df = load_data()
+
+# もし読み込み失敗などでDFが空なら空枠を作成
+if df.empty:
+    df = pd.DataFrame(columns=["店舗名", "受付番号", "受付時間", "ステータス"])
+
+# 現在の店舗でフィルタリング
+df_store = df[df["店舗名"] == current_store]
+
+tab1, tab2 = st.tabs(["🖊️ 受付", "📋 一覧"])
+
+# === タブ1：受付画面 ===
+with tab1:
+    waiting_count = len(df_store[df_store["ステータス"] == "準備中"])
+    st.info(f"{current_store}の待ち： **{waiting_count}** 人")
+
+    with st.form("entry_form", clear_on_submit=True):
+        number = st.text_input("受付番号", placeholder="例：101")
+        submitted = st.form_submit_button("登録する")
+
+        if submitted and number:
+            # 新しい行を作成
+            new_row = pd.DataFrame({
+                "店舗名": [current_store],
+                "受付番号": [number],
+                "受付時間": [datetime.now().strftime("%H:%M:%S")],
+                "ステータス": ["準備中"]
+            })
+            
+            # 結合
+            updated_df = pd.concat([df, new_row], ignore_index=True)
+            
+            # 保存
+            save_data(updated_df)
+            
+            st.toast(f"✅ {number}番 を登録しました！", icon="🎉")
+            time.sleep(1)
+            st.rerun()
+
+# === タブ2：一覧画面 ===
+with tab2:
+    pending_df = df_store[df_store["ステータス"] == "準備中"]
+
+    if pending_df.empty:
+        st.success("待機列はありません 🎉")
+    else:
+        now = datetime.now()
+        # リスト表示
+        for index, row in pending_df.iterrows():
+            # 全体データ(df)内でのインデックスを保持
+            original_index = index 
+
+            # 時間計算
+            reg_time_str = str(row['受付時間'])
+            try:
+                reg_time = datetime.strptime(reg_time_str, "%H:%M:%S")
+                reg_time = reg_time.replace(year=now.year, month=now.month, day=now.day)
+                diff_minutes = (now - reg_time).total_seconds() / 60
+            except:
+                diff_minutes = 0
+
+            # デザイン分岐
+            if diff_minutes >= ALERT_MINUTES:
+                container = st.error()
+                icon = "🔥"
+            else:
+                container = st.container(border=True)
+                icon = "📦"
+
+            with container:
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.markdown(f"### {icon} **{row['受付番号']}**")
+                    st.caption(f"受付: {reg_time_str}")
+                with c2:
+                    st.write("") 
+                    if st.button("完了", key=f"btn_{original_index}", type="primary"):
+                        # ステータスを変更
+                        df.at[original_index, "ステータス"] = "完了"
+                        
+                        # 保存
+                        save_data(df)
+                        
+                        st.toast(f"👋 {row['受付番号']}番、完了！")
+                        time.sleep(0.5)
+                        st.rerun()
