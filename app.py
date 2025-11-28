@@ -6,7 +6,8 @@ from streamlit_gsheets import GSheetsConnection
 
 # --- 設定 ---
 ALERT_MINUTES = 5 
-STORES = ["渋谷店", "新宿店", "池袋店"]
+STORES = ["東金町", "西新小岩", "綾瀬"]
+SHEET_NAME = "シート1"  # ★ここ！スプレッドシート下のタブ名に合わせてください
 
 # --- パスワード認証 ---
 def check_password():
@@ -15,7 +16,6 @@ def check_password():
     if st.session_state.password_correct:
         return True
     
-    # 開発中のローカル実行でSecretsがない場合のエラー回避
     if "PASSWORD" not in st.secrets:
         return True 
 
@@ -42,28 +42,26 @@ st.set_page_config(page_title="クラウド受付", layout="centered")
 st.markdown("""<style>div.stButton > button { width: 100%; height: 3em; font-weight: bold; }</style>""", unsafe_allow_html=True)
 
 # === データベース接続 ===
-# ここでスプレッドシートに接続します
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# データ読み込み関数（キャッシュ有効時間を短くして最新を保つ）
 def load_data():
     try:
-        df = conn.read()
-        # カラムが不足している場合は補完
+        # ★修正：ワークシート名を指定して読み込む
+        df = conn.read(worksheet=SHEET_NAME)
+        
         required_cols = ["店舗名", "受付番号", "受付時間", "ステータス"]
         for col in required_cols:
             if col not in df.columns:
                 df[col] = ""
-        return df
+        # 空行や欠損値を文字型として処理（エラー回避）
+        return df.fillna("")
     except:
-        # シートが空の場合などのエラー回避
         return pd.DataFrame(columns=["店舗名", "受付番号", "受付時間", "ステータス"])
 
 # 店舗選択
 current_store = st.sidebar.selectbox("🏠 店舗を選択", STORES)
 st.title(f"📱 {current_store} 受付")
 
-# ボタンで手動更新できるようにする
 if st.button("データ更新 🔄"):
     st.rerun()
 
@@ -88,10 +86,10 @@ with tab1:
                 "受付時間": [datetime.now().strftime("%H:%M:%S")],
                 "ステータス": ["準備中"]
             })
-            # 既存データと結合
             updated_df = pd.concat([df, new_data], ignore_index=True)
-            # スプレッドシートを更新
-            conn.update(data=updated_df)
+            
+            # ★修正：ワークシート名を指定して書き込む
+            conn.update(worksheet=SHEET_NAME, data=updated_df)
             
             st.toast(f"✅ {number}番 を登録しました！", icon="🎉")
             time.sleep(1)
@@ -106,8 +104,6 @@ with tab2:
     else:
         now = datetime.now()
         for index, row in pending_df.iterrows():
-            # 全体データ(df)の中でのインデックスを探す
-            # 行を一意に特定するためにインデックスを使用
             original_index = index
 
             reg_time_str = str(row['受付時間'])
@@ -133,9 +129,10 @@ with tab2:
                 with c2:
                     st.write("") 
                     if st.button("完了", key=f"btn_{original_index}", type="primary"):
-                        # ステータスを更新して書き込み
                         df.at[original_index, "ステータス"] = "完了"
-                        conn.update(data=df)
+                        
+                        # ★修正：ワークシート名を指定して書き込む
+                        conn.update(worksheet=SHEET_NAME, data=df)
                         
                         st.toast(f"👋 {row['受付番号']}番、完了！")
                         time.sleep(0.5)
