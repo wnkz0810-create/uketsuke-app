@@ -1,33 +1,44 @@
 import streamlit as st
+import json
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+from google.oauth2 import service_account
+import gspread
 
-st.set_page_config(page_title="キャッシュ削除＆再接続")
-st.title("🧹 キャッシュお掃除モード")
+st.set_page_config(page_title="強制接続テスト")
+st.title("🛡️ 最終手段：直接接続テスト")
 
-if st.button("キャッシュをクリアして再接続する", type="primary"):
-    # 1. 記憶（キャッシュ）を全消去
-    st.cache_resource.clear()
-    st.cache_data.clear()
-    st.success("✨ キャッシュを削除しました！")
+try:
+    # 1. Secretsからデータを取得（ここが読み込めればSecretsは合っている）
+    if "connections" not in st.secrets or "gsheets" not in st.secrets["connections"]:
+        st.error("❌ Secretsの設定が見つかりません。")
+        st.stop()
+
+    json_str = st.secrets["connections"]["gsheets"]["service_account"]
+    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+
+    # 2. JSONを辞書データに変換
+    creds_dict = json.loads(json_str)
+
+    # 3. 直接認証を行う（Streamlitの機能を介さない）
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    client = gspread.authorize(creds)
+
+    # 4. シートを開いてみる
+    sh = client.open_by_url(url)
+    worksheet = sh.get_worksheet(0) # 0番目（一番左）のシート
     
-    # 2. 新しく接続しなおす
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
-        
-        # 3. ちゃんとロボットとしてつながったか確認
-        # (open_by_url はロボットにしかできない技です)
-        url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-        conn.client.open_by_url(url)
-        
-        st.balloons()
-        st.success("✅ 完璧です！ロボット認証に成功しました！")
-        st.info("これで本番コードに戻しても動きます。")
-        
-    except AttributeError:
-        st.error("❌ まだ「鍵なし（Public）」として認識されています...")
-        st.write("対策：ブラウザのタブを閉じて、もう一度開き直してみてください。")
-    except Exception as e:
-        st.error(f"❌ 別のエラー：{e}")
+    st.success(f"✅ つながりました！ シート名: **{sh.title}**")
+    st.balloons()
+    
+    # 5. 書き込みテスト
+    st.write("書き込みテスト中...")
+    worksheet.update_acell('E1', 'ConnectionOK')
+    st.success("✅ 書き込みも成功しました！")
+    
+    st.info("このコードで成功したら、この方式を使った「完成版」をお渡しします。")
 
-st.write("👆 上のボタンを押して、風船が飛べば成功です！")
+except Exception as e:
+    st.error("❌ エラーが発生しました")
+    st.code(e)
+    st.write("エラー内容を教えてください！")
