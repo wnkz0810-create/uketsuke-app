@@ -1,131 +1,35 @@
 import streamlit as st
-import pandas as pd
-import time
-from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# --- 設定 ---
-ALERT_MINUTES = 5 
-STORES = ["渋谷店", "新宿店", "池袋店"]
-SHEET_NAME = "data"  # ★ここを「data」に変更しました！
+st.set_page_config(page_title="接続診断")
+st.title("🕵️‍♀️ 接続診断モード")
 
-# --- パスワード認証 ---
-def check_password():
-    if "password_correct" not in st.session_state:
-        st.session_state.password_correct = False
-    if st.session_state.password_correct:
-        return True
+# 接続を試みる
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
     
-    if "PASSWORD" not in st.secrets:
-        return True 
-
-    st.text_input("パスワード", type="password", key="password_input", on_change=password_entered)
-    return False
-
-def password_entered():
-    if st.session_state["password_input"] == st.secrets["PASSWORD"]:
-        st.session_state.password_correct = True
-        del st.session_state["password_input"]
-    else:
-        st.error("パスワードが違います")
-
-if not check_password():
-    st.stop()
-
-# --- アプリ本体 ---
-st.set_page_config(page_title="クラウド受付", layout="centered")
-st.markdown("""<style>div.stButton > button { width: 100%; height: 3em; font-weight: bold; }</style>""", unsafe_allow_html=True)
-
-# === データベース接続 ===
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-def load_data():
-    # ★修正：エラー隠し（try-except）を削除しました。
-    # これで「読み込み」が失敗しているなら、起動直後にド派手なエラーが出ます。
+    # SecretsからURLを取得して、直接スプレッドシートを開いてみる
+    url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+    st.write("ターゲットURL:", url)
     
-    df = conn.read(worksheet=SHEET_NAME)
+    # gspreadの機能を使って情報を取得
+    sh = conn.client.open_by_url(url)
+    st.success(f"✅ 成功！ スプレッドシート名: **{sh.title}**")
     
-    # 必要な列がない場合の補完処理
-    required_cols = ["店舗名", "受付番号", "受付時間", "ステータス"]
-    for col in required_cols:
-        if col not in df.columns:
-            df[col] = ""
-    return df.fillna("")
+    st.write("---")
+    st.write("🤖 ロボットが見えているシート一覧:")
+    
+    # 全シートの名前を表示
+    worksheet_list = sh.worksheets()
+    for ws in worksheet_list:
+        st.info(f"📄 シート名: **{ws.title}** (ID: {ws.id})")
 
-# 店舗選択
-current_store = st.sidebar.selectbox("🏠 店舗を選択", STORES)
-st.title(f"📱 {current_store} 受付")
+    st.warning("👆 コードの `SHEET_NAME` は、この「シート名」と完全に一致していますか？")
 
-if st.button("データ更新 🔄"):
-    st.rerun()
-
-# ここでエラーが出るかチェック！
-df = load_data()
-
-df_store = df[df["店舗名"] == current_store]
-
-tab1, tab2 = st.tabs(["🖊️ 受付", "📋 一覧"])
-
-# === タブ1：受付 ===
-with tab1:
-    waiting_count = len(df_store[df_store["ステータス"] == "準備中"])
-    st.info(f"{current_store}の待ち： **{waiting_count}** 人")
-
-    with st.form("entry_form", clear_on_submit=True):
-        number = st.text_input("受付番号", placeholder="例：101")
-        submitted = st.form_submit_button("登録する")
-
-        if submitted and number:
-            new_data = pd.DataFrame({
-                "店舗名": [current_store],
-                "受付番号": [number],
-                "受付時間": [datetime.now().strftime("%H:%M:%S")],
-                "ステータス": ["準備中"]
-            })
-            updated_df = pd.concat([df, new_data], ignore_index=True)
-            
-            # 書き込み処理
-            conn.update(worksheet=SHEET_NAME, data=updated_df)
-            
-            st.toast(f"✅ {number}番 を登録しました！", icon="🎉")
-            time.sleep(1)
-            st.rerun()
-
-# === タブ2：一覧 ===
-with tab2:
-    pending_df = df_store[df_store["ステータス"] == "準備中"]
-
-    if pending_df.empty:
-        st.success("待機列はありません 🎉")
-    else:
-        now = datetime.now()
-        for index, row in pending_df.iterrows():
-            original_index = index
-            reg_time_str = str(row['受付時間'])
-            try:
-                reg_time = datetime.strptime(reg_time_str, "%H:%M:%S")
-                reg_time = reg_time.replace(year=now.year, month=now.month, day=now.day)
-                diff_minutes = (now - reg_time).total_seconds() / 60
-            except:
-                diff_minutes = 0
-
-            if diff_minutes >= ALERT_MINUTES:
-                container = st.error()
-                icon = "🔥"
-            else:
-                container = st.container(border=True)
-                icon = "📦"
-
-            with container:
-                c1, c2 = st.columns([2, 1])
-                with c1:
-                    st.markdown(f"### {icon} **{row['受付番号']}**")
-                    st.caption(f"受付: {reg_time_str}")
-                with c2:
-                    st.write("") 
-                    if st.button("完了", key=f"btn_{original_index}", type="primary"):
-                        df.at[original_index, "ステータス"] = "完了"
-                        conn.update(worksheet=SHEET_NAME, data=df)
-                        st.toast(f"👋 {row['受付番号']}番、完了！")
-                        time.sleep(0.5)
-                        st.rerun()
+except Exception as e:
+    st.error("❌ 接続エラーが発生しました")
+    st.code(e)
+    st.write("考えられる原因：")
+    st.write("1. SecretsのJSON貼り付けミス")
+    st.write("2. スプレッドシートの「共有」にロボットのメアドが入っていない")
+    st.write("3. Google Drive API / Sheets API が無効")
