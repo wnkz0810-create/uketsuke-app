@@ -99,7 +99,7 @@ st.markdown("""<style>div.stButton > button { width: 100%; height: 3em; font-wei
 
 # サイドバー：店舗選択
 current_store = st.sidebar.selectbox("🏠 店舗を選択", STORES)
-st.title(f"📱🍕{current_store} 受付")
+st.title(f"🍕{current_store} 受付")
 
 # 更新ボタン
 if st.button("データ更新 🔄"):
@@ -200,5 +200,6 @@ with tab2:
                         time.sleep(0.5)
                         st.rerun()
             # --- 修正箇所：ここまで ---
+
 
 
