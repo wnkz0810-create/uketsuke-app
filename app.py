@@ -9,6 +9,7 @@ from google.oauth2 import service_account
 # --- 設定 ---
 ALERT_MINUTES = 15
 STORES = ["東金町", "新宿店", "池袋店"]
+AUTO_REFRESH_INTERVAL = 15  # 自動更新の間隔（秒）。短すぎるとAPI制限にかかるので注意！
 
 # --- 1. パスワード認証 ---
 def check_password():
@@ -200,6 +201,7 @@ with tab2:
                         time.sleep(0.5)
                         st.rerun()
             # --- 修正箇所：ここまで ---
+
 
 
 
