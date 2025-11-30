@@ -7,8 +7,8 @@ import gspread
 from google.oauth2 import service_account
 
 # --- 設定 ---
-ALERT_MINUTES = 5 
-STORES = ["渋谷店", "新宿店", "池袋店"]
+ALERT_MINUTES = 15
+STORES = ["東金町", "新宿店", "池袋店"]
 
 # --- 1. パスワード認証 ---
 def check_password():
@@ -200,3 +200,4 @@ with tab2:
                         time.sleep(0.5)
                         st.rerun()
             # --- 修正箇所：ここまで ---
+
