@@ -154,7 +154,7 @@ with tab2:
         st.success("待機列はありません 🎉")
     else:
         now = datetime.now()
-        # リスト表示
+      # リスト表示
         for index, row in pending_df.iterrows():
             # 全体データ(df)内でのインデックスを保持
             original_index = index 
@@ -168,15 +168,20 @@ with tab2:
             except:
                 diff_minutes = 0
 
-            # デザイン分岐
+            # --- 修正箇所：ここから ---
+            # デザインの分岐（赤枠か、普通の枠か）
             if diff_minutes >= ALERT_MINUTES:
-                container = st.error()
+                # 時間経過している場合：赤枠（エラー表示）を使う
+                # メッセージとして経過時間を表示します
+                box = st.error(f"🔥 {int(diff_minutes)}分経過しています")
                 icon = "🔥"
             else:
-                container = st.container(border=True)
+                # 通常の場合：普通の枠線を使う
+                box = st.container(border=True)
                 icon = "📦"
 
-            with container:
+            # 決まった枠（box）の中に書き込む
+            with box:
                 c1, c2 = st.columns([2, 1])
                 with c1:
                     st.markdown(f"### {icon} **{row['受付番号']}**")
@@ -185,11 +190,13 @@ with tab2:
                     st.write("") 
                     if st.button("完了", key=f"btn_{original_index}", type="primary"):
                         # ステータスを変更
-                        df.at[original_index, "ステータス"] = "完了"
+                        df_current = load_data() # 最新データを再取得
+                        df_current.at[original_index, "ステータス"] = "完了"
                         
                         # 保存
-                        save_data(df)
+                        save_data(df_current)
                         
                         st.toast(f"👋 {row['受付番号']}番、完了！")
                         time.sleep(0.5)
                         st.rerun()
+            # --- 修正箇所：ここまで ---
